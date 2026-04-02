@@ -1,0 +1,13 @@
+{
+  "name": "consumer-dispute-chatbot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Chat-based consumer dispute helper for Render deployment",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
