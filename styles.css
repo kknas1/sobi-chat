@@ -708,6 +708,7 @@ a {
   }
 
   .layout {
+    grid-template-columns: 1fr;
     height: auto;
     gap: 10px;
     margin-top: 10px;
@@ -764,7 +765,10 @@ a {
   }
 
   .side-stack {
+    grid-template-rows: none;
     gap: 10px;
+    height: auto;
+    overflow: visible;
   }
 
   .state-grid {
@@ -805,5 +809,29 @@ a {
 
   .result-amount {
     font-size: 1.5rem;
+  }
+}
+
+@media (max-width: 900px) {
+  .layout {
+    grid-template-columns: 1fr;
+    height: auto;
+    overflow: visible;
+  }
+
+  .chat-panel {
+    min-height: 68svh;
+    height: auto;
+    overflow: visible;
+  }
+
+  .chat-log {
+    min-height: 44svh;
+  }
+
+  .side-stack {
+    grid-template-rows: none;
+    height: auto;
+    overflow: visible;
   }
 }
