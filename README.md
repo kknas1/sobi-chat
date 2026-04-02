@@ -24,7 +24,7 @@ AI가 한번 검증해주는 그런걸 만들려고 합니다.
 
 암튼 잘 되곘죠?
 
-🔗 **라이브 데모**: https://consumer-dispute-calculator.onrender.com
+🔗 **라이브 데모**: [https://sobi-chat.onrender.com/)
 
 암튼.. 실제 보상되는 금액은 사건마다 매우 다를수도 있는데 어쨋든 법의 기준대로 계산이 가능하게끔 만들어봤습니다.
 
