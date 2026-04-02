@@ -670,32 +670,140 @@ a {
   }
 
   .page-shell {
-    width: min(100vw - 20px, 100%);
+    width: min(100vw - 12px, 100%);
     height: auto;
-    padding: 20px 0 32px;
+    padding: 6px 0 14px;
     overflow: visible;
+  }
+
+  .hero {
+    padding: 12px 14px;
+    border-radius: 18px;
+  }
+
+  .eyebrow {
+    font-size: 0.66rem;
+    margin-bottom: 3px;
+  }
+
+  .hero h1 {
+    font-size: 1rem;
+    line-height: 1.15;
+  }
+
+  .hero-links {
+    margin-top: 6px;
+  }
+
+  .hero-note {
+    min-height: 24px;
+    padding: 4px 8px;
+    font-size: 0.76rem;
   }
 
   .hero,
   .panel {
-    padding: 20px;
-    border-radius: 24px;
+    padding: 14px;
+    border-radius: 18px;
   }
 
   .layout {
     height: auto;
+    gap: 10px;
+    margin-top: 10px;
+  }
+
+  .chat-panel {
+    min-height: 72svh;
+    gap: 10px;
+  }
+
+  .chat-log {
+    min-height: 48svh;
+    gap: 8px;
+    padding-right: 0;
+  }
+
+  .panel-header h2 {
+    font-size: 1rem;
+  }
+
+  .chat-bubble {
+    max-width: 94%;
+    padding: 11px 12px;
+    font-size: 0.92rem;
+    line-height: 1.42;
+    border-radius: 15px;
+  }
+
+  .message.preview::after {
+    font-size: 0.64rem;
+    padding: 2px 6px;
+  }
+
+  #chat-input {
+    min-height: 88px;
+    padding: 12px;
+    font-size: 0.95rem;
+  }
+
+  .chat-form {
+    gap: 8px;
   }
 
   .chat-actions {
     flex-direction: column;
+    gap: 8px;
   }
 
   .primary-button,
   .secondary-button {
     width: 100%;
+    min-height: 42px;
+    font-size: 0.9rem;
   }
 
-  .chat-bubble {
-    max-width: 92%;
+  .side-stack {
+    gap: 10px;
+  }
+
+  .state-grid {
+    gap: 8px;
+    margin-top: 10px;
+  }
+
+  .state-block {
+    padding: 10px 12px;
+    border-radius: 14px;
+  }
+
+  .state-label,
+  .section-label {
+    font-size: 0.72rem;
+    margin-bottom: 5px;
+  }
+
+  .state-value,
+  .result-rule,
+  .breakdown li,
+  .reference-list li,
+  .meta-pill {
+    font-size: 0.88rem;
+    line-height: 1.4;
+  }
+
+  .result-card {
+    min-height: 0;
+    margin-top: 10px;
+    padding: 12px;
+    border-radius: 14px;
+  }
+
+  .result-title {
+    font-size: 1rem;
+  }
+
+  .result-amount {
+    font-size: 1.5rem;
   }
 }
