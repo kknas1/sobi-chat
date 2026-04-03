@@ -518,6 +518,111 @@ function parseNumeric(text) {
   return Number.isFinite(value) ? value : null;
 }
 
+function normalizeYear(value) {
+  if (value == null || value === "") return null;
+  const year = Number(value);
+  if (!Number.isFinite(year)) return null;
+  if (year >= 100) return year;
+  return 2000 + year;
+}
+
+function buildUtcDate(year, month, day = 1) {
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return null;
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  return new Date(Date.UTC(year, month - 1, day));
+}
+
+function diffDays(startDate, endDate) {
+  if (!(startDate instanceof Date) || !(endDate instanceof Date)) return null;
+  const ms = endDate.getTime() - startDate.getTime();
+  return ms >= 0 ? Math.round(ms / 86400000) : null;
+}
+
+function currentDateParts(referenceDate = new Date()) {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "numeric",
+    day: "numeric"
+  });
+  const parts = formatter.formatToParts(referenceDate);
+  const read = (type) => Number(parts.find((item) => item.type === type)?.value);
+  return {
+    year: read("year"),
+    month: read("month"),
+    day: read("day")
+  };
+}
+
+function parseDateMatch(match, { fallbackYear = null, fallbackDay = 1 } = {}) {
+  if (!match) return null;
+  const year = normalizeYear(match[1]) ?? fallbackYear;
+  const month = Number(match[2]);
+  const day = match[3] ? Number(match[3]) : fallbackDay;
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return null;
+  return { year, month, day };
+}
+
+function extractStartDateParts(transcript, referenceDate = new Date()) {
+  const now = currentDateParts(referenceDate);
+  const patterns = [
+    /(?:(\d{2,4})\s*년\s*)?(\d{1,2})\s*월(?:\s*(\d{1,2})\s*일)?\s*(?:부터\s*)?(?:시작|개시|등록|첫\s*이용|이용\s*시작)/,
+    /(?:시작일|개시일|등록일)(?:은|이)?\s*(?:(\d{2,4})\s*년\s*)?(\d{1,2})\s*월(?:\s*(\d{1,2})\s*일)?/,
+    /(?:시작|개시|등록)(?:은|이)?\s*(?:(\d{2,4})\s*년\s*)?(\d{1,2})\s*월(?:\s*(\d{1,2})\s*일)?/
+  ];
+
+  for (const pattern of patterns) {
+    const match = transcript.match(pattern);
+    const parsed = parseDateMatch(match, { fallbackYear: now.year, fallbackDay: 1 });
+    if (parsed) return parsed;
+  }
+
+  return null;
+}
+
+function extractCurrentDateParts(transcript, startParts = null, referenceDate = new Date()) {
+  const now = currentDateParts(referenceDate);
+  const resolveYear = (explicitYear, month) => {
+    const normalized = normalizeYear(explicitYear);
+    if (normalized) return normalized;
+    if (startParts?.year != null && Number.isFinite(month)) {
+      return month < startParts.month ? startParts.year + 1 : startParts.year;
+    }
+    return now.year;
+  };
+
+  const patterns = [
+    /(?:지금|현재|오늘|아직)(?:은|이)?\s*(?:(\d{2,4})\s*년\s*)?(\d{1,2})\s*월(?:\s*(\d{1,2})\s*일)?/,
+    /(?:(\d{2,4})\s*년\s*)?(\d{1,2})\s*월(?:\s*(\d{1,2})\s*일)?\s*(?:인데|기준|현재|지금|오늘)/,
+    /(?:해지일|환불일|해지|환불)(?:은|이)?\s*(?:(\d{2,4})\s*년\s*)?(\d{1,2})\s*월(?:\s*(\d{1,2})\s*일)?/
+  ];
+
+  for (const pattern of patterns) {
+    const match = transcript.match(pattern);
+    if (!match) continue;
+    const month = Number(match[2]);
+    const year = resolveYear(match[1], month);
+    const day = match[3] ? Number(match[3]) : year === now.year && month === now.month ? now.day : 1;
+    return { year, month, day };
+  }
+
+  if (/(지금|현재|오늘)/.test(transcript)) {
+    return now;
+  }
+
+  return null;
+}
+
+function inferElapsedDaysFromTimeline(transcript, referenceDate = new Date()) {
+  const startParts = extractStartDateParts(transcript, referenceDate);
+  if (!startParts) return null;
+
+  const endParts = extractCurrentDateParts(transcript, startParts, referenceDate) || currentDateParts(referenceDate);
+  const startDate = buildUtcDate(startParts.year, startParts.month, startParts.day);
+  const endDate = buildUtcDate(endParts.year, endParts.month, endParts.day);
+  return diffDays(startDate, endDate);
+}
+
 function parseDamageState(text) {
   if (text.includes("몹시")) return "poor";
   if (text.includes("다소")) return "fair";
@@ -613,7 +718,7 @@ function extractDaysFromTranscript(transcript, mode) {
     const monthMatch = transcript.match(/(\d+(?:\.\d+)?)\s*(개월|달)\s*(다니|이용|사용|썼|지난)/);
     if (monthMatch) return Math.round(Number(monthMatch[1]) * 30);
   } else {
-    const yearMatch = transcript.match(/(\d+(?:\.\d+)?)\s*년권?/);
+    const yearMatch = transcript.match(/(\d+(?:\.\d+)?)\s*년\s*(?:권|회원권|계약|등록)/) || transcript.match(/(\d+(?:\.\d+)?)\s*년권/);
     if (yearMatch) return Math.round(Number(yearMatch[1]) * 365);
 
     const monthMatch = transcript.match(/(\d+(?:\.\d+)?)\s*(개월|달)\s*(권|등록|계약)?/);
@@ -650,7 +755,7 @@ function extractFieldValueFromTranscript(transcript, field) {
 
 function inferFitnessDuration(values, transcript) {
   if (values.totalDays == null) {
-    const years = transcript.match(/(\d+(?:\.\d+)?)\s*년권?/);
+    const years = transcript.match(/(\d+(?:\.\d+)?)\s*년\s*(?:권|회원권|계약|등록)/) || transcript.match(/(\d+(?:\.\d+)?)\s*년권/);
     if (years) values.totalDays = Math.round(Number(years[1]) * 365);
   }
   if (values.totalDays == null) {
@@ -660,6 +765,10 @@ function inferFitnessDuration(values, transcript) {
   if (values.elapsedDays == null) {
     const elapsed = transcript.match(/(\d+(?:\.\d+)?)\s*(개월|달)\s*(다니|이용|사용|썼|지남)/);
     if (elapsed) values.elapsedDays = Math.round(Number(elapsed[1]) * 30);
+  }
+  if (values.elapsedDays == null) {
+    const inferred = inferElapsedDaysFromTimeline(transcript);
+    if (inferred != null) values.elapsedDays = inferred;
   }
 }
 
@@ -706,6 +815,54 @@ function applyFallbackExtraction(category, rule, transcript, currentValues) {
 
 function getMissingField(rule, values) {
   return rule.fields.find((field) => values[field.id] == null || values[field.id] === "");
+}
+
+function buildUserTranscript(conversation = []) {
+  return conversation
+    .filter((item) => item?.role === "user" && typeof item.content === "string")
+    .map((item) => item.content.trim())
+    .filter(Boolean)
+    .join("\n");
+}
+
+function inferFitnessRuleFromTranscript(transcript, currentRuleId = null) {
+  const businessCause = /(폐업|휴업|사업자 사정|센터 사정|운영중단|이전|정원초과|고장)/.test(transcript);
+  const countType = /(회|횟수|pt|수업|강습)/.test(transcript);
+  const refundIntent = /(환불|해지|중도해지)/.test(transcript);
+  const beforeStart = /(시작 전|개시 전|이용 전|첫 수업 전|아직 안|아직 전)/.test(transcript);
+  const afterStartByWords = /(개시일 이후|시작 후|이용개시 후|다닌|다니다|이용했|사용했|수강했|출석했|이미 지난|경과)/.test(transcript);
+  const inferredElapsedDays = inferElapsedDaysFromTimeline(transcript);
+  const afterStart = afterStartByWords || (Number.isFinite(inferredElapsedDays) && inferredElapsedDays > 0);
+
+  if (!businessCause && !refundIntent) return currentRuleId;
+
+  if (beforeStart && !afterStart) {
+    return businessCause ? "fitness-business-before-start" : "fitness-consumer-before-start";
+  }
+
+  if (afterStart && !beforeStart) {
+    if (businessCause) {
+      return countType ? "fitness-business-after-start-count" : "fitness-business-after-start-period";
+    }
+    return countType ? "fitness-consumer-after-start-count" : "fitness-consumer-after-start-period";
+  }
+
+  return currentRuleId;
+}
+
+function buildMissingFieldQuestion(rule, field, transcript) {
+  if (field.id === "elapsedDays") {
+    if (/(년|월|일|시작|개시|지금|현재|오늘)/.test(transcript)) {
+      return "이용개시일과 환불 요청 시점을 정확한 날짜로 알려주세요. 예: 2026년 1월 4일 시작, 2026년 4월 3일 해지";
+    }
+    return "언제부터 이용했고 지금이 언제인지 알려주세요. 예: 2026년 1월 시작, 오늘 해지";
+  }
+
+  if (field.id === "totalDays") {
+    return "계약 기간을 알려주세요. 예: 3개월권, 6개월권, 1년권, 총 180일";
+  }
+
+  return rule.fields.find((item) => item.id === field.id)?.question || field.question;
 }
 
 function buildRuleClarifier(categoryId) {
@@ -791,6 +948,8 @@ async function callOpenAIChat({ conversation, caseState }) {
     "최신 user 메시지가 직전 assistant 질문에 대한 단답형 답변인지, 아니면 새 사건 설명인지 구분하라.",
     "categoryId와 ruleId는 제공된 catalog의 id만 사용한다.",
     "values는 필요한 값만 채운다.",
+    "헬스·피트니스 기간형에서는 '26년 1월 시작', '지금 4월', '1년권', '2개월 다님' 같은 표현을 보고 elapsedDays 또는 totalDays를 최대한 추출하라.",
+    "사용자가 시작 시점과 현재 시점을 이미 말했으면 '며칠인지 알려달라'고 다시 묻지 마라.",
     "assistantMessage는 한국어 한두 문장으로 다음 질문 또는 정리 내용을 작성한다.",
     "불확실하면 null을 사용하고 추측하지 마라.",
     "반환 JSON 형식: {\"resetCase\": boolean, \"categoryId\": string|null, \"ruleId\": string|null, \"values\": object, \"assistantMessage\": string}"
@@ -837,6 +996,7 @@ async function handleChat(body) {
   const history = Array.isArray(body.history) ? body.history : [];
   const caseState = body.caseState && typeof body.caseState === "object" ? body.caseState : {};
   const conversation = normalizeConversation(history, message);
+  const transcript = buildUserTranscript(conversation);
 
   let nextState = {
     categoryId: caseState.categoryId || null,
@@ -909,6 +1069,13 @@ async function handleChat(body) {
     nextState.ruleId = aiData.ruleId;
   }
 
+  if (nextState.categoryId === "fitness") {
+    const inferredRuleId = inferFitnessRuleFromTranscript(transcript, nextState.ruleId);
+    if (inferredRuleId && getRuleById(nextState.categoryId, inferredRuleId)) {
+      nextState.ruleId = inferredRuleId;
+    }
+  }
+
   if (aiData && aiData.values && typeof aiData.values === "object") {
     nextState.values = { ...nextState.values, ...aiData.values };
   }
@@ -935,9 +1102,11 @@ async function handleChat(body) {
     };
   }
 
+  nextState.values = applyFallbackExtraction(category, rule, transcript, nextState.values);
+
   const missingField = getMissingField(rule, nextState.values);
   if (missingField) {
-    nextState.lastQuestion = aiData?.assistantMessage || missingField.question;
+    nextState.lastQuestion = buildMissingFieldQuestion(rule, missingField, transcript);
     return {
       assistantMessage: nextState.lastQuestion,
       caseState: withDisplay(nextState),
