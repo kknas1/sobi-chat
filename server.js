@@ -825,29 +825,83 @@ function buildUserTranscript(conversation = []) {
     .join("\n");
 }
 
-function inferFitnessRuleFromTranscript(transcript, currentRuleId = null) {
-  const businessCause = /(폐업|휴업|사업자 사정|센터 사정|운영중단|이전|정원초과|고장)/.test(transcript);
-  const countType = /(회|횟수|pt|수업|강습)/.test(transcript);
-  const refundIntent = /(환불|해지|중도해지)/.test(transcript);
-  const beforeStart = /(시작 전|개시 전|이용 전|첫 수업 전|아직 안|아직 전)/.test(transcript);
-  const afterStartByWords = /(개시일 이후|시작 후|이용개시 후|다닌|다니다|이용했|사용했|수강했|출석했|이미 지난|경과)/.test(transcript);
+function detectFitnessCause(transcript) {
+  if (/(폐업|휴업|사업자 사정|센터 사정|운영중단|이전|정원초과|고장|시설 문제)/.test(transcript)) return "business";
+  if (/(소비자 사유|개인사정|개인 사정|제 사정|내 사정|이사|질병|몸이 안|못 가|못가|못 다니|못다니|사정상|변심)/.test(transcript)) return "consumer";
+  return null;
+}
+
+function detectFitnessStartStatus(transcript) {
+  const beforeStart = /(시작 전|개시 전|이용 전|첫 수업 전|아직 안|아직 전|미이용|아직 시작 안)/.test(transcript);
+  const afterStartByWords = /(개시일 이후|시작 후|이용개시 후|시작했고|시작했|다닌|다니다|이용했|사용했|수강했|출석했|이미 지난|경과)/.test(transcript);
   const inferredElapsedDays = inferElapsedDaysFromTimeline(transcript);
   const afterStart = afterStartByWords || (Number.isFinite(inferredElapsedDays) && inferredElapsedDays > 0);
 
-  if (!businessCause && !refundIntent) return currentRuleId;
+  if (beforeStart && !afterStart) return "before";
+  if (afterStart && !beforeStart) return "after";
+  return null;
+}
 
-  if (beforeStart && !afterStart) {
-    return businessCause ? "fitness-business-before-start" : "fitness-consumer-before-start";
+function detectFitnessContractType(transcript) {
+  if (/(회|횟수|pt|수업|강습|회차|패키지)/.test(transcript)) return "count";
+  if (/(기간형|이용기간|년권|개월권|달권|\d+\s*(개월|달)\s*(권|등록|계약)?|\d+\s*년\s*(권|회원권|등록|계약)|\d+\s*년권)/.test(transcript)) return "period";
+  return null;
+}
+
+function isFitnessRefundFlow(transcript, currentRuleId = null) {
+  return /(환불|해지|중도해지)/.test(transcript) || /fitness-(business|consumer)-/.test(currentRuleId || "");
+}
+
+function inferFitnessRuleFromTranscript(transcript) {
+  const cause = detectFitnessCause(transcript);
+  const startStatus = detectFitnessStartStatus(transcript);
+  const contractType = detectFitnessContractType(transcript);
+
+  if (!cause || !startStatus) return null;
+  if (startStatus === "before") {
+    return cause === "business" ? "fitness-business-before-start" : "fitness-consumer-before-start";
+  }
+  if (!contractType) return null;
+  if (cause === "business") {
+    return contractType === "count" ? "fitness-business-after-start-count" : "fitness-business-after-start-period";
+  }
+  return contractType === "count" ? "fitness-consumer-after-start-count" : "fitness-consumer-after-start-period";
+}
+
+function buildFitnessClarifier(transcript) {
+  const cause = detectFitnessCause(transcript);
+  const startStatus = detectFitnessStartStatus(transcript);
+  const contractType = detectFitnessContractType(transcript);
+  const missing = [];
+
+  if (!cause) {
+    missing.push("해지 사유가 사업자 사정인지 소비자 개인사정인지");
+  }
+  if (!startStatus) {
+    missing.push("아직 이용 시작 전인지 이미 시작 후인지");
+  }
+  if (startStatus === "after" && !contractType) {
+    missing.push("기간형 계약인지 횟수형 수업/PT인지");
   }
 
-  if (afterStart && !beforeStart) {
-    if (businessCause) {
-      return countType ? "fitness-business-after-start-count" : "fitness-business-after-start-period";
-    }
-    return countType ? "fitness-consumer-after-start-count" : "fitness-consumer-after-start-period";
+  if (!missing.length) return null;
+  return `환불 계산 전에 ${missing.join(", ")} 먼저 알려주세요.`;
+}
+
+function resolveFitnessRefundState(transcript, currentRuleId = null) {
+  if (!isFitnessRefundFlow(transcript, currentRuleId)) {
+    return { ruleId: currentRuleId, assistantMessage: null };
   }
 
-  return currentRuleId;
+  const inferredRuleId = inferFitnessRuleFromTranscript(transcript);
+  if (inferredRuleId) {
+    return { ruleId: inferredRuleId, assistantMessage: null };
+  }
+
+  return {
+    ruleId: null,
+    assistantMessage: buildFitnessClarifier(transcript)
+  };
 }
 
 function buildMissingFieldQuestion(rule, field, transcript) {
@@ -948,6 +1002,7 @@ async function callOpenAIChat({ conversation, caseState }) {
     "최신 user 메시지가 직전 assistant 질문에 대한 단답형 답변인지, 아니면 새 사건 설명인지 구분하라.",
     "categoryId와 ruleId는 제공된 catalog의 id만 사용한다.",
     "values는 필요한 값만 채운다.",
+    "헬스 환불은 사업자/소비자 사유, 이용개시 전/후, 기간형/횟수형 중 필요한 분류 정보가 없으면 ruleId를 확정하지 마라.",
     "헬스·피트니스 기간형에서는 '26년 1월 시작', '지금 4월', '1년권', '2개월 다님' 같은 표현을 보고 elapsedDays 또는 totalDays를 최대한 추출하라.",
     "사용자가 시작 시점과 현재 시점을 이미 말했으면 '며칠인지 알려달라'고 다시 묻지 마라.",
     "assistantMessage는 한국어 한두 문장으로 다음 질문 또는 정리 내용을 작성한다.",
@@ -1069,13 +1124,6 @@ async function handleChat(body) {
     nextState.ruleId = aiData.ruleId;
   }
 
-  if (nextState.categoryId === "fitness") {
-    const inferredRuleId = inferFitnessRuleFromTranscript(transcript, nextState.ruleId);
-    if (inferredRuleId && getRuleById(nextState.categoryId, inferredRuleId)) {
-      nextState.ruleId = inferredRuleId;
-    }
-  }
-
   if (aiData && aiData.values && typeof aiData.values === "object") {
     nextState.values = { ...nextState.values, ...aiData.values };
   }
@@ -1089,6 +1137,24 @@ async function handleChat(body) {
       result: null,
       source
     };
+  }
+
+  if (category.id === "fitness") {
+    const fitnessResolution = resolveFitnessRefundState(transcript, nextState.ruleId);
+    if (fitnessResolution.ruleId && getRuleById(nextState.categoryId, fitnessResolution.ruleId)) {
+      nextState.ruleId = fitnessResolution.ruleId;
+    } else if (fitnessResolution.ruleId == null) {
+      nextState.ruleId = null;
+    }
+    if (fitnessResolution.assistantMessage) {
+      nextState.lastQuestion = fitnessResolution.assistantMessage;
+      return {
+        assistantMessage: nextState.lastQuestion,
+        caseState: withDisplay(nextState),
+        result: null,
+        source
+      };
+    }
   }
 
   const rule = getRuleById(nextState.categoryId, nextState.ruleId);
@@ -1214,6 +1280,15 @@ const server = http.createServer((req, res) => {
   serveStatic(req, res);
 });
 
-server.listen(PORT, HOST, () => {
-  console.log(`Server listening on http://${HOST}:${PORT}`);
-});
+if (require.main === module) {
+  server.listen(PORT, HOST, () => {
+    console.log(`Server listening on http://${HOST}:${PORT}`);
+  });
+}
+
+module.exports = {
+  handleChat,
+  inferElapsedDaysFromTimeline,
+  inferFitnessRuleFromTranscript,
+  resolveFitnessRefundState
+};
